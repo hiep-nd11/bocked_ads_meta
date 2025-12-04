@@ -35,10 +35,15 @@ def transcribe_audio(audio_path: str, api_url: str = TRANSCRIBE_API_URL) -> str:
             
             if response.status_code == 200:
                 result = response.json()
-                # Giả sử API trả về dạng {"text": "..."} hoặc {"transcript": "..."}
-                transcript = result.get('text') or result.get('transcript') or result.get('result', '')
-                print(f"Transcribe thành công. Text length: {len(transcript)} characters")
-                return transcript
+                # API trả về dạng {"success": true, "text": "...", "filename": "..."}
+                if result.get('success', False):
+                    transcript = result.get('text', '')
+                    filename = result.get('filename', '')
+                    print(f"Transcribe thành công. File: {filename}, Text length: {len(transcript)} characters")
+                    return transcript
+                else:
+                    print(f"API trả về success=false: {result}")
+                    return ""
             else:
                 print(f"Lỗi API transcribe - Status {response.status_code}: {response.text}")
                 return ""
