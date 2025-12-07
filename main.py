@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-Main script để kiểm tra video theo Meta Advertising Policy.
-
-Quy trình:
-1. Nhận video làm đầu vào
-2. Tách audio từ video
-3. Gửi audio đến API transcribe để lấy text
-4. Gửi text qua VLM để kiểm tra vi phạm
-5. Trích xuất frames từ video
-6. Gửi frames qua VLM để kiểm tra vi phạm
-7. Tổng hợp: Nếu 1 trong 2 (text hoặc frames) có Yes thì kết luận là Yes
-"""
-
 import sys
 import os
 import argparse
@@ -20,27 +7,32 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from video_utils import extract_frames, extract_audio, is_video_file
 from api_client import transcribe_audio, check_text_vlm, check_frame_vlm
-from config import DEFAULT_INTERVAL_SECONDS, DEFAULT_MAX_THREADS
+from config import DEFAULT_INTERVAL_SECONDS, DEFAULT_MAX_THREADS, DEFAULT_THRESHOLD_PERCENT
 
 
-def check_video_frames(frames, max_workers: int = 50) -> str:
+def check_video_frames(frames, max_workers: int = 50, threshold_percent: float = 25) -> str:
     """
-    Kiểm tra tất cả frames của video.
+    Kiểm tra tất cả frames của video với logic: cần >= threshold_percent% frames có kết quả "Yes" mới kết luận là "Yes"
     
     Args:
         frames: List các frames
         max_workers: Số threads tối đa
+        threshold_percent: Ngưỡng phần trăm (mặc định 25%)
     
     Returns:
-        "Yes" nếu có vi phạm, "No" nếu không, "Error" nếu có lỗi
+        "Yes" nếu >= threshold_percent% frames có "Yes", "No" nếu không, "Error" nếu có lỗi
     """
     if not frames:
         print("Không có frame nào được trích xuất!")
         return "No"
     
     print(f"\nBắt đầu kiểm tra {len(frames)} frames với {max_workers} threads...")
+    print(f"Ngưỡng: {threshold_percent}% frames phải có kết quả 'Yes' để kết luận vi phạm")
     
-    final_result = "No"
+    # Thu thập tất cả kết quả
+    results = {}
+    yes_count = 0
+    valid_count = 0  # Số frames hợp lệ (không phải Error)
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -48,25 +40,51 @@ def check_video_frames(frames, max_workers: int = 50) -> str:
             for i, frame in enumerate(frames)
         }
         
+        # Chờ tất cả frames xong (không cancel sớm)
         for future in as_completed(futures):
             frame_index, result = future.result()
+            results[frame_index] = result
             
+            # Đếm số frames có "Yes" và số frames hợp lệ
             if result.lower().startswith('yes'):
-                print(f"\n⚠️  Phát hiện vi phạm tại frame {frame_index}!")
-                final_result = "Yes"
-                # Cancel các tasks còn lại
-                for f in futures:
-                    f.cancel()
-                break
+                yes_count += 1
+                valid_count += 1
+                print(f"Frame {frame_index}: {result} ✓")
+            elif result.lower().startswith('no'):
+                valid_count += 1
+            # Error không tính vào valid_count
     
-    print(f"KẾT QUẢ KIỂM TRA FRAMES: {final_result}")
+    # Tính tỷ lệ
+    if valid_count == 0:
+        print("Không có frame hợp lệ nào!")
+        final_result = "No"
+    else:
+        percentage = (yes_count / valid_count) * 100
+        print(f"\n{'='*60}")
+        print(f"THỐNG KÊ KẾT QUẢ FRAMES:")
+        print(f"  - Tổng số frames: {len(frames)}")
+        print(f"  - Frames hợp lệ: {valid_count}")
+        print(f"  - Frames có 'Yes': {yes_count}")
+        print(f"  - Tỷ lệ: {percentage:.2f}%")
+        print(f"  - Ngưỡng yêu cầu: {threshold_percent}%")
+        print(f"{'='*60}")
+        
+        if percentage >= threshold_percent:
+            final_result = "Yes"
+            print(f"⚠️  KẾT LUẬN FRAMES: VI PHẠM (≥{threshold_percent}% frames có 'Yes')")
+        else:
+            final_result = "No"
+            print(f"✅ KẾT LUẬN FRAMES: AN TOÀN (<{threshold_percent}% frames có 'Yes')")
+    
+    print(f"\nKẾT QUẢ KIỂM TRA FRAMES: {final_result}")
     return final_result
 
 
 def check_video_complete(video_path: str, 
                         interval_seconds: float = 1,
                         max_workers: int = 50,
-                        keep_audio: bool = False) -> str:
+                        keep_audio: bool = False,
+                        threshold_percent: float = 25) -> str:
     """
     Kiểm tra video đầy đủ: cả audio (text) và frames.
     
@@ -75,6 +93,7 @@ def check_video_complete(video_path: str,
         interval_seconds: Khoảng thời gian giữa các frames (giây)
         max_workers: Số threads tối đa cho việc kiểm tra frames
         keep_audio: Có giữ lại file audio sau khi xử lý không
+        threshold_percent: Ngưỡng phần trăm frames cần có "Yes" để kết luận vi phạm (mặc định 30%)
     
     Returns:
         "Yes" nếu có vi phạm (từ text hoặc frames), "No" nếu không, "Error" nếu có lỗi
@@ -147,7 +166,7 @@ def check_video_complete(video_path: str,
     if frames:
         print(f"✅ Đã trích xuất {len(frames)} frames\n")
         print("🔍 BƯỚC 5: Kiểm tra frames qua VLM...")
-        frames_result = check_video_frames(frames, max_workers)
+        frames_result = check_video_frames(frames, max_workers, threshold_percent)
     else:
         print("⚠️  Không có frames để kiểm tra\n")
     
@@ -188,7 +207,7 @@ Ví dụ:
     parser.add_argument(
         '--video_path',
         type=str,
-        default="/home/hiepnd72/Documents/work/blocked/12.11/Drama/Drama (5).mp4",
+        default="/home/hiepnd72/Documents/work/blocked/12.11/Failed/x (6).mp4",
         help='Đường dẫn đến file video cần kiểm tra'
     )
     
@@ -212,6 +231,13 @@ Ví dụ:
         help='Giữ lại file audio sau khi xử lý (mặc định: xóa)'
     )
     
+    parser.add_argument(
+        '--threshold',
+        type=float,
+        default=DEFAULT_THRESHOLD_PERCENT,
+        help=f'Ngưỡng phần trăm frames cần có "Yes" để kết luận vi phạm (mặc định: {DEFAULT_THRESHOLD_PERCENT}%%)'
+    )
+    
     args = parser.parse_args()
     
     # Kiểm tra video path
@@ -228,7 +254,8 @@ Ví dụ:
         args.video_path,
         interval_seconds=args.interval,
         max_workers=args.threads,
-        keep_audio=args.keep_audio
+        keep_audio=args.keep_audio,
+        threshold_percent=args.threshold
     )
     
     # Exit code: 0 nếu pass, 1 nếu có vi phạm

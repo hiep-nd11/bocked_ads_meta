@@ -38,6 +38,7 @@ def transcribe_audio(audio_path: str, api_url: str = TRANSCRIBE_API_URL) -> str:
                 # API trả về dạng {"success": true, "text": "...", "filename": "..."}
                 if result.get('success', False):
                     transcript = result.get('text', '')
+                    print("Text: ", transcript)
                     filename = result.get('filename', '')
                     print(f"Transcribe thành công. File: {filename}, Text length: {len(transcript)} characters")
                     return transcript

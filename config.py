@@ -4,7 +4,7 @@
 
 # VLM API Config
 VLM_API_URL = "http://162.213.119.141:40484/v1/chat/completions"
-VLM_MODEL_NAME = "a"
+VLM_MODEL_NAME = "vlm-7b"
 VLM_API_KEY = "mysecretkey123"
 
 VLM_HEADERS = {
@@ -39,8 +39,9 @@ For each image:
 - A brief explanation of why.
 - A suggestion on how to fix it (if applicable).
 
-If the risk_level is *High*, *Medium* or *Low*, return Yes; otherwise, return No. Do not provide any explanation.
+If the risk_level is *High* or *Medium*, return Yes; otherwise, return No. Do not provide any explanation.
 """
+
 
 # Prompt cho phân tích text (transcript từ audio)
 TEXT_PROMPT_TEMPLATE = """
@@ -71,4 +72,5 @@ Text to analyze:
 # Default settings
 DEFAULT_INTERVAL_SECONDS = 1
 DEFAULT_MAX_THREADS = 50
+DEFAULT_THRESHOLD_PERCENT = 25  
 
